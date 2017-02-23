@@ -1,6 +1,7 @@
 import cozmo
 import asyncio
 import Common.wochelper
+import random
 from Common.woc import WOC
 from cozmo.util import degrees, distance_mm, speed_mmps
 
@@ -8,9 +9,12 @@ MAX_HEAD_ANGLE = cozmo.robot.MAX_HEAD_ANGLE
 MIN_HEAD_ANGLE = degrees(20)
 ANGLE_EPSILON = degrees(0.5)
 TURN_SPEED = 20
+TURN_SPEED_FAST = 100
 STRAIGHT_SPEED = 25
 DISTANCE_HUMAN = 100
 TURN_ANGLE_AFTER_INTERACTION = degrees(90)
+MIN_CRAZY_SPIN_TIME = 3.1
+MAX_CRAZY_SPIN_TIME = 5.0
 
 class IceBreaker(WOC):
     theFace = None
@@ -18,6 +22,7 @@ class IceBreaker(WOC):
     def __init__(self):
         self._isCompleted = False
         self._face = None
+        self._newRound = True
 
     async def run(self, coz_conn: cozmo.conn.CozmoConnection):
         await Common.wochelper.initFaceHandlers(coz_conn,
@@ -25,8 +30,10 @@ class IceBreaker(WOC):
                                                 self.onFaceAppeared,
                                                 self.onFaceDisappeared)
         self._robot = await coz_conn.wait_for_robot()
+        self._initPose = self._robot.pose
         while True:
             if not self._face:
+                await self.crazySpin()
                 await self.spin()
             else:
                 await self.moveCloser()
@@ -37,11 +44,16 @@ class IceBreaker(WOC):
     async def spin(self):
         # start spin
         if not self._robot.is_moving:
-            await self._robot.drive_wheels(TURN_SPEED, -TURN_SPEED)
+            # head up so that Cozmo can see faces
+            spinAction = self._robot.set_head_angle(MAX_HEAD_ANGLE,
+                                                 in_parallel=True)
+            await self._robot.drive_wheels(-TURN_SPEED, TURN_SPEED)
+            await spinAction.wait_for_completed()
+            cozmo.logger.info("spinAction = %s", spinAction)
 
     async def moveCloser(self):
         # turn to human Cozmo saw
-        # await self._robot.turn_towards_face(self._face).wait_for_completed()
+        await self._robot.turn_towards_face(self._face).wait_for_completed()
         # move closer
         action1 = self._robot.drive_straight(distance_mm(DISTANCE_HUMAN),
                                              speed_mmps(STRAIGHT_SPEED),
@@ -54,19 +66,29 @@ class IceBreaker(WOC):
         cozmo.logger.info("action1 = %s", action1)
         await action2.wait_for_completed()
         cozmo.logger.info("action2 = %s", action2)
-        await asyncio.sleep(0.6)
         
     async def coreInteraction(self):
-        await self._robot.say_text("What's your name?",
-                                   use_cozmo_voice=False,
+        await self._robot.say_text("What's your password?",
+                                   use_cozmo_voice=True,
                                    in_parallel=True,
                                    duration_scalar=1.0).wait_for_completed()
         
     async def afterInteraction(self):
-        await self._robot.drive_straight(distance_mm(-DISTANCE_HUMAN),
-                                         speed_mmps(STRAIGHT_SPEED),
-                                         should_play_anim=False).wait_for_completed()
+        await self._robot.go_to_pose(self._initPose).wait_for_completed()
         await self._robot.turn_in_place(TURN_ANGLE_AFTER_INTERACTION).wait_for_completed()
+        self._newRound = True
+##        await self._robot.drive_straight(distance_mm(-DISTANCE_HUMAN),
+##                                         speed_mmps(STRAIGHT_SPEED),
+##                                         should_play_anim=False).wait_for_completed()
+
+    async def crazySpin(self):
+        if self._newRound:
+            t = random.uniform(MIN_CRAZY_SPIN_TIME, MAX_CRAZY_SPIN_TIME)
+            await self._robot.drive_wheels(-TURN_SPEED_FAST, TURN_SPEED_FAST)
+            await asyncio.sleep(t)
+            self._robot.stop_all_motors()
+            await asyncio.sleep(0.5)
+            self._newRound = False
     
     async def onFaceObserved(self, evt: cozmo.faces.EvtFaceObserved, obj=None, **kwargs):
         if self._face and self._face == evt.face:
