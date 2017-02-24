@@ -91,16 +91,24 @@ class IceBreaker(WOC):
         cozmo.logger.info("action2 = %s", action2)
         
     async def coreInteraction(self):
-        question = self._questions.getRandomQuestion()
-        (pitch, duration) = await self.customizeSpeech(question)
-        print(question)
-        print("pitch = %s, durationScalar = %s" % (pitch,duration))
-        await self._robot.say_text(question,
+        self._question = self._questions.getRandomQuestion()
+        (pitch, self._duration) = await self.customizeSpeech(self._question)
+        print(self._question)
+        print("pitch = %s, durationScalar = %s" % (pitch, self._duration))
+        await self._robot.say_text(self._question,
                                    use_cozmo_voice=True,
                                    in_parallel=True,
                                    voice_pitch=pitch,
-                                   duration_scalar=duration).wait_for_completed()
-        
+                                   duration_scalar=self._duration).wait_for_completed()
+
+    async def repeatInteraction(self):
+        pitch = random.uniform(MIN_PITCH, MAX_PITCH)
+        await self._robot.say_text(self._question,
+                                   use_cozmo_voice=True,
+                                   in_parallel=True,
+                                   voice_pitch=pitch,
+                                   duration_scalar=self._duration).wait_for_completed()
+    
     async def waitFinishInteraction(self):
         finishConfirmed = False
         while not finishConfirmed:
@@ -134,15 +142,14 @@ class IceBreaker(WOC):
                     print("Didn't tap the cube")
 
                 if tapped:
-                    finishConfirmed = True
                     cube.set_lights(cozmo.lights.green_light)
-                    await self._robot.play_anim_trigger(cozmo.anim.Triggers.BuildPyramidSuccess).wait_for_completed()
+                    
+                    if cube == self._cube:
+                        finishConfirmed = True
+                        await self._robot.play_anim_trigger(cozmo.anim.Triggers.BuildPyramidSuccess).wait_for_completed()
+                    else:
+                        await self.repeatInteraction()
                     cube.set_lights_off()
-                if cube == self._cube:
-                    pass
-                else:
-                    # found a different cube
-                    pass
             else:
                 # didn't find cube
                 await self._robot.play_anim_trigger(cozmo.anim.Triggers.DriveStartAngry).wait_for_completed()
